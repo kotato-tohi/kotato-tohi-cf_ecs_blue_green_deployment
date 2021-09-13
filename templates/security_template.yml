@@ -1,0 +1,164 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Provision of SecurityLayer
+
+# パラメータ
+Parameters:
+  EnvTag:
+    Type: String
+    Description: Environment Name
+
+  Prefix:
+    Type: String
+    Description: prefix for tag name
+
+  VpcId:
+    Type: String
+
+Resources:
+
+  SgAlb:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: sg-alb
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        # https
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: '0.0.0.0/0'
+        # alt http
+        - IpProtocol: tcp
+          FromPort: 4430
+          ToPort: 4430
+          CidrIp: '0.0.0.0/0'
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-sg-${EnvTag}-alb'
+
+
+  SgEcs:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: sg-ecs
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        # http
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref SgAlb
+        # alt http
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          SourceSecurityGroupId: !Ref SgAlb
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-sg-${EnvTag}-ecs'
+
+  SgRds:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: sg-rds
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        # mysql
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref SgEcs          
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-sg-${EnvTag}-rds'
+
+
+  #ECSのタスク実行ようIAMRoleを定義
+  EcsTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${Prefix}-iam-${EnvTag}-ecs-role'
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  CodeDeployExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${Prefix}-iam-${EnvTag}-codedeploy-role'
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codedeploy.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSCodeDeployRoleForECS
+
+
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AWSCodeDeployFullAccess
+
+  LambdaPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: LambdaPolicy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - ec2:*
+              - logs:*
+            Resource: '*'
+          - Effect: Allow
+            Resource: '*'
+            Action:
+              - iam:PassRole
+            Condition:
+              StringEqualsIfExists:
+                iam:PassedToService:
+                  - codedeploy.amazonaws.com
+      Roles:
+        - !Ref LambdaExecutionRole
+
+
+Outputs:
+
+  SgAlb:
+    Value: !Ref SgAlb
+
+  SgEcs:
+    Value: !Ref SgEcs
+
+  EcsTaskExecutionRole:
+    Value: !GetAtt EcsTaskExecutionRole.Arn
+  
+  CodeDeployExecutionRole:
+    Value: !GetAtt   CodeDeployExecutionRole.Arn
+
+  LambdaExecutionRole:
+    Value: !GetAtt LambdaExecutionRole.Arn

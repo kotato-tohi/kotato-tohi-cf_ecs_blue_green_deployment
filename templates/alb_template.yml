@@ -1,0 +1,129 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Provision of ALB
+
+# パラメータ
+Parameters:
+  EnvTag:
+    Type: String
+    Description: Environment Name
+
+  Prefix:
+    Type: String
+    Description: prefix for tag name
+
+  VpcId:
+    Type: String
+    Description: kuso
+
+  SubnetPublic1a1:
+    Type: String
+
+  SubnetPublic1c1:
+    Type: String
+
+  SgAlb:
+    Type: String
+
+  AcmCertificateArn:
+    Type: String
+  
+
+Resources:
+  # ALB
+  Alb:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub '${Prefix}-alb-${EnvTag}'
+      Scheme: internet-facing
+      Type: application
+      SecurityGroups:
+        - !Ref SgAlb
+      Subnets:
+        - !Ref SubnetPublic1a1
+        - !Ref SubnetPublic1c1
+      Tags:
+        - Key: Name
+          Value: !Sub ${Prefix}-alb-${EnvTag}
+  
+
+
+  # Tgを2個作る(Blue/Green用)
+  AlbTgBlue:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      VpcId: !Ref VpcId
+      Name: "AlbTgBlue"
+      Protocol: HTTP
+      Port: 80
+      TargetType: ip
+
+  AlbTgGreen:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      VpcId: !Ref VpcId
+      Name: "AlbTgGreen"
+      Protocol: HTTP
+      Port: 80
+      # Port: 8080
+      TargetType: ip
+
+
+  
+
+
+  # 2個作ったTgをそれぞれAlbのListenerに紐づける
+
+# CertificateArn: String
+
+
+  
+  AlbListenerBlue:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref Alb
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref AcmCertificateArn
+      Port: 443
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref AlbTgBlue
+
+  AlbListenerGreen:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref Alb
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref AcmCertificateArn
+      Port: 4430
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref AlbTgGreen
+
+Outputs:
+
+  AlbTgBlue:
+    Value: !Ref AlbTgBlue
+
+  AlbTgGreen:
+    Value: !Ref AlbTgGreen
+
+  AlbTgBlueName:
+    Value: !GetAtt AlbTgBlue.TargetGroupName
+
+  AlbTgGreenName:
+    Value: !GetAtt AlbTgGreen.TargetGroupName
+
+
+
+
+  Alb:
+    Value: !Ref Alb
+
+  AlbListenerBlue:
+    Value: !Ref AlbListenerBlue
+
+  AlbListenerGreen:
+    Value: !Ref AlbListenerGreen
+  

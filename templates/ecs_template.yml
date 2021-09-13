@@ -1,0 +1,174 @@
+
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+
+  # From RootStack
+  EnvTag:
+    Type: String
+    Description: Environment Name
+
+  Prefix:
+    Type: String
+    Description: prefix for tag name
+
+  # From Parameter
+  EcsImageName:
+    Type: String
+
+  
+  # From AlbStack
+  AlbTgBlue:
+    Type: String
+
+  AlbTgGreen:
+    Type: String
+  
+  Alb:
+    Type: String
+
+  #From SecurityStack
+  SgEcs:
+    Type: String
+  
+  EcsTaskExecutionRoleArn:
+    Type: String
+
+  CodeDeployExecutionRole:
+    Type: String
+
+  # From NetworkStack
+  SubnetPrivate1a1:
+    Type: String
+
+  SubnetPrivate1c1:
+    Type: String
+
+
+
+  
+
+Resources: 
+
+  # ecs cluster作成
+
+  EcsCluster:
+    Type: 'AWS::ECS::Cluster'
+    Properties:
+      ClusterName: !Sub '${Prefix}-ecs-${EnvTag}-cluster'
+      Tags:
+          - Key: Name
+            Value: !Sub '${Prefix}-ecs-${EnvTag}-cluster'
+
+
+  # ecs タスク定義
+  EcsTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Cpu: "256"
+      ExecutionRoleArn: !Ref EcsTaskExecutionRoleArn
+      Family: !Sub '${Prefix}-ecs-${EnvTag}-task'
+      Memory: "512"
+      NetworkMode: "awsvpc"
+      RequiresCompatibilities:
+        - FARGATE
+
+      ContainerDefinitions:
+        - Name: !Sub '${Prefix}-${EnvTag}-ecs-test-container'
+          Image: !Sub ${EcsImageName}
+          MemoryReservation: 128
+          PortMappings:
+            - HostPort: 80
+              Protocol: tcp
+              ContainerPort: 80
+          # LogConfiguration:
+          #   LogDriver: awslogs
+          #   Options:
+          #     awslogs-group: !Ref ECSLogGroup
+          #     awslogs-region: !Ref 'AWS::Region'
+          #     awslogs-stream-prefix: !Ref ProjectName
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-ecs-${EnvTag}-task'
+
+
+
+  EcsService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref EcsCluster
+      DesiredCount: 2
+      DeploymentController:
+        Type: CODE_DEPLOY
+      LaunchType: FARGATE
+      LoadBalancers:
+        - TargetGroupArn: !Ref AlbTgBlue
+          ContainerPort: 80
+          ContainerName: !Sub '${Prefix}-${EnvTag}-ecs-test-container'
+        # - TargetGroupArn: !Ref AlbTgGreen
+        #   ContainerPort: 80
+        #   ContainerName: !Sub '${Prefix}-${EnvTag}-ecs-test-container'
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !Ref SgEcs
+          Subnets:
+            - !Ref SubnetPrivate1a1
+            - !Ref SubnetPrivate1c1
+      ServiceName: !Sub '${Prefix}-${EnvTag}-ecs-service'
+      TaskDefinition: !Ref EcsTaskDefinition
+    
+  # CodeDeployAppName:
+  #   Type: AWS::CodeDeploy::Application
+  #   Properties: 
+  #     ApplicationName: !Sub '${Prefix}-${EnvTag}-code-deploy-ecs'
+  #     ComputePlatform: "ECS"
+  #     Tags:
+  #       - Key: Name
+  #         Value: !Sub '${Prefix}-${EnvTag}-code-deploy-ecs'
+
+# CodeDeployDeploymentConfig:
+#   Type: AWS::CodeDeploy::DeploymentConfig
+#   Properties: 
+#     ComputePlatform: ECS
+#     # DeploymentConfigName: "ECS"
+#     # MinimumHealthyHosts: 
+#     #   MinimumHealthyHosts
+#     TrafficRoutingConfig: 
+#       TimeBasedCanary: 
+#         CanaryInterval: 60
+#         CanaryPercentage: 100
+
+
+
+  # ECS用のDeploymentGroupの設定はCLoudFormationでサポートされていない
+  # 別途JSONで定義してCLIから設定
+  
+  # CodeDeployDeproyGroup:
+  #   Type: AWS::CodeDeploy::DeploymentGroup
+  #   Properties: 
+  #     ApplicationName: !Ref CodeDeployAppName
+  #     BlueGreenDeploymentConfiguration: 
+  #       DeploymentReadyOption: 
+  #         ActionOnTimeout: STOP_DEPLOYMENT
+  #         WaitTimeInMinutes: 60
+  #       TerminateBlueInstancesOnDeploymentSuccess:
+  #         Action: TERMINATE
+  #         TerminationWaitTimeInMinutes: 60
+
+  #     DeploymentConfigName: CodeDeployDefault.OneAtATime
+  #     DeploymentStyle: 
+  #       DeploymentOption: WITH_TRAFFIC_CONTROL
+  #       DeploymentType: BLUE_GREEN
+  #     ECSServices: 
+  #       - ClusterName: !Sub '${Prefix}-ecs-${EnvTag}-cluster'
+  #         ServiceName: !Sub '${Prefix}-${EnvTag}-ecs-service'
+
+  #     LoadBalancerInfo: 
+  #       # ElbInfoList: 
+  #       #   - Name: !Ref Alb
+  #       TargetGroupInfoList: 
+  #         - Name: !Ref AlbTgBlue
+  #         - Name: !Ref AlbTgGreen
+  #     ServiceRoleArn: !Ref CodeDeployExecutionRole

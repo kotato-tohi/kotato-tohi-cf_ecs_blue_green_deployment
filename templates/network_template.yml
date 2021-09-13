@@ -1,0 +1,200 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Provision of VPC
+
+# パラメータ
+Parameters:
+  EnvTag:
+    Type: String
+    Description: Environment Name
+
+  EnvIp:
+    Type: String
+    Description: secondary octet ip addr
+
+  Prefix: 
+    Type: String
+    Description: prefix for tag name
+
+    
+  KeyName:
+    Type: AWS::SSM::Parameter::Name
+    Default: "vpcname-test"
+
+Resources:
+  # VPCの作成
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Sub '10.${EnvIp}.0.0/16'
+      Tags:
+        - Key: Name
+          # Value: !Sub '{{resolve:ssm:${KeyName}:1}}'
+          Value: !Sub '${Prefix}-vpc-${EnvTag}'
+            
+  # IntergetGatewayの作成
+  Igw:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-igw-${EnvTag}'
+  
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref Igw
+
+  ##----------------------------------##
+  # Subnets
+  ##----------------------------------##
+
+  # public subnet 作成
+  SubnetPublic1a1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: ap-northeast-1a
+      VpcId: !Ref Vpc
+      CidrBlock: !Sub 10.${EnvIp}.10.0/24
+      MapPublicIpOnLaunch: 'true'
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-subnet-${EnvTag}-public-1a-1'
+
+  SubnetPrivate1a1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: ap-northeast-1a
+      VpcId: !Ref Vpc
+      CidrBlock: !Sub 10.${EnvIp}.11.0/24
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-subnet-${EnvTag}-private-1a-1'
+
+  SubnetPublic1c1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: ap-northeast-1c
+      VpcId: !Ref Vpc
+      CidrBlock: !Sub 10.${EnvIp}.20.0/24
+      MapPublicIpOnLaunch: 'true'
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-subnet-${EnvTag}-public-1c-1'
+
+  SubnetPrivate1c1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: ap-northeast-1c
+      VpcId: !Ref Vpc
+      CidrBlock: !Sub 10.${EnvIp}.21.0/24
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-subnet-${EnvTag}-private-1c-1'
+
+  ##----------------------------------##
+  # NATGateway
+  ##----------------------------------##
+  # NATGateway
+  Ngw1a:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt EipNgw1a.AllocationId
+      ConnectivityType: public
+      SubnetId: !Ref SubnetPublic1a1 # Required
+
+  #EIPの作成
+  EipNgw1a:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: Vpc
+
+  ##----------------------------------##
+  # RouteTable
+  ##----------------------------------##
+
+  # public route table 
+  RouteTableForPublicSubnet:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: ${Prefix}-${EnvTag}-rtb-public
+  
+  DefaultRouteForPublicSubnet:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref RouteTableForPublicSubnet
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref Igw
+
+
+  # private route table
+  RouteTableForPrivateSubnet:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: ${Prefix}-${EnvTag}-rtb-public
+  
+  DefaultRouteForPrivateSubnet:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref RouteTableForPrivateSubnet
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref Ngw1a
+          
+
+          
+
+
+    
+  # rtb associate
+  RouteAssocPubSubnet1a:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SubnetPublic1a1
+      RouteTableId: !Ref RouteTableForPublicSubnet
+
+  RouteAssocPubSubnet1c:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SubnetPublic1c1
+      RouteTableId: !Ref RouteTableForPublicSubnet
+
+
+  RouteAssocPrivateSubnet1a1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SubnetPrivate1a1
+      RouteTableId: !Ref RouteTableForPrivateSubnet
+
+  RouteAssocPrivateSubnet1c1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SubnetPrivate1c1
+      RouteTableId: !Ref RouteTableForPrivateSubnet
+
+
+Outputs:
+  VpcId:
+    Value: !Ref Vpc
+    Description: VPC id
+
+  SubnetPublic1a1:
+    Value: !Ref SubnetPublic1a1
+    Description: public subnet 1a 1
+  
+  SubnetPublic1c1:
+    Value: !Ref SubnetPublic1c1
+    Description: public subnet 1c 1
+
+  SubnetPrivate1a1:
+    Value: !Ref SubnetPrivate1a1
+    Description: private subnet 1a 1
+
+  SubnetPrivate1c1:
+    Value: !Ref SubnetPrivate1c1
+    Description: private subnet 1c 1

@@ -1,0 +1,155 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Lambda test"
+
+Parameters:
+  EnvTag:
+    Type: String
+    Description: Environment Name
+
+  Prefix:
+    Type: String
+    Description: prefix for tag name
+
+  LambdaExecutionRole:
+    Type: String
+
+  CodeDeployExecutionRole:
+    Type: String
+    
+
+
+  AlbTgBlueName:
+    Type: String
+  AlbTgGreenName:
+    Type: String
+
+  AlbListenerBlue:
+    Type: String
+
+  AlbListenerGreen:
+    Type: String
+  
+
+Resources:
+
+  LambdaFunction:
+    Type: 'AWS::Lambda::Function'
+    DeletionPolicy: 'Delete'
+    Properties:
+      Code:
+        # python 3.8 SourceCode
+        ZipFile: |
+          import boto3
+          import json
+          import logging
+          import cfnresponse
+          from botocore.exceptions import ClientError
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+          client = boto3.client('codedeploy')
+
+          def lambda_handler(event, context):
+            print("MYLOG: START lambda_handler")
+            deploymentGroup = event['ResourceProperties']['deploymentGroup']
+            appName = event['ResourceProperties']['appName']
+            clusterName = event['ResourceProperties']['ECSClusterName']
+            serviceName = event['ResourceProperties']['ECSServiceName']
+            print("MYLOG: GET EVENTS ResourceProperties")
+            print('REQUEST RECEIVED:\n' + json.dumps(event))
+            responseData = {}
+            try:
+              print("MYLOG: Try")
+              res = client.create_application(
+                  applicationName=appName,
+                  computePlatform='ECS'
+              )
+              logger.info(res)
+              logger.info("SUCCESS: CodeDeploy Application created.")
+              res = client.create_deployment_group(
+                  applicationName=appName,
+                  deploymentGroupName=deploymentGroup,
+                  deploymentConfigName='CodeDeployDefault.ECSLinear10PercentEvery1Minutes',
+                  serviceRoleArn=event['ResourceProperties']['CodeDeployServiceRoleArn'],
+                  autoRollbackConfiguration={
+                      'enabled': True,
+                      'events': [
+                          'DEPLOYMENT_FAILURE',
+                      ]
+                  },
+                  deploymentStyle={
+                      'deploymentType': 'BLUE_GREEN',
+                      'deploymentOption': 'WITH_TRAFFIC_CONTROL'
+                  },
+                  blueGreenDeploymentConfiguration={
+                      'terminateBlueInstancesOnDeploymentSuccess': {
+                          'action': 'TERMINATE',
+                          'terminationWaitTimeInMinutes': 30
+                      },
+                      'deploymentReadyOption': {
+                          'actionOnTimeout': 'STOP_DEPLOYMENT',
+                          'waitTimeInMinutes': 5
+                      }
+                  },
+                  loadBalancerInfo={
+                      'targetGroupPairInfoList': [
+                          {
+                              'targetGroups': [
+                                  {
+                                      'name': event['ResourceProperties']['TargetGroup1']
+                                  },
+                                  {
+                                      'name': event['ResourceProperties']['TargetGroup2']
+                                  },
+                              ],
+                              'prodTrafficRoute': {
+                                  'listenerArns': [
+                                      event['ResourceProperties']['ALBListener1'],
+                                  ]
+                              },
+                              'testTrafficRoute': {
+                                  'listenerArns': [
+                                      event['ResourceProperties']['ALBListener2'],
+                                  ]
+                              }
+                          },
+                      ]
+                  },
+                  ecsServices=[
+                      {
+                          'serviceName': serviceName,
+                          'clusterName': clusterName
+                      },
+                  ]
+              )
+            except ClientError as e:
+                logger.error("ERROR: Something error!")
+                logger.error(e)
+                responseData = {'error': str(e)}
+                cfnresponse.send(event, context, cfnresponse.FAILED, responseData)
+            else:
+                logger.info(res)
+                logger.info(
+                    "SUCCESS: CodeDeploy Application and DeploymentGroup created.")
+                return cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+      Handler: index.lambda_handler
+      Role: !Ref LambdaExecutionRole
+      Runtime: python3.8
+      Timeout: 10
+
+  CreateCodeDeploy:
+    Type: Custom::CreateCodeDeploy
+    Properties:
+      ServiceToken: !GetAtt LambdaFunction.Arn
+      Region: !Ref AWS::Region
+      ECSClusterName: !Sub '${Prefix}-ecs-${EnvTag}-cluster'
+      ECSServiceName: !Sub '${Prefix}-${EnvTag}-ecs-service'
+      CodeDeployServiceRoleArn: !Ref CodeDeployExecutionRole
+      TargetGroup1: !Ref AlbTgBlueName
+      TargetGroup2: !Ref AlbTgGreenName
+      ALBListener1: !Ref AlbListenerBlue
+      ALBListener2: !Ref AlbListenerGreen
+      appName: !Sub '${Prefix}-code-${EnvTag}-application-lambda'
+      deploymentGroup: !Sub '${Prefix}-code-${EnvTag}-deploymentgroup'
+
+## require

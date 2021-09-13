@@ -1,0 +1,153 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Manage myself verification environment
+
+Mappings:
+  EnvMap:
+    pro:
+      # EnvTag: "pro"
+      EnvIp: "10"
+      Cidr: "10.10.0.0/16"
+    stg:
+      # EnvTag: "stg"
+      EnvIp: "20"
+      Cidr: "10.20.0.0/16"
+    dev:
+      # EnvTag: "dev"
+      EnvIp: "30"
+      Cidr: "10.30.0.0/16"
+
+Parameters: 
+
+  EnvTag:
+    Type: String
+    Description: Environment Name 
+    AllowedValues:
+      - pro
+      - stg
+      - dev
+    Default: dev
+
+  Prefix:
+    Type: String
+    Description: for tag name
+    Default: nt
+
+  NetworkTemplate:
+    Description: Network template Object URL
+    Type: String
+ 
+  SecurityTemplate:
+    Description: Network template Object URL
+    Type: String
+  
+  AlbTemplate:
+    Description: Alb template Object URL
+    Type: String
+
+  EcsTemplate:
+    Description: Ecs template Object URL
+    Type: String
+
+  LambdaTemplate:  
+    Description: Lambda template Object URL
+    Type: String
+
+  EcsImageName:
+    Type: String
+    Default: "296066267476.dkr.ecr.ap-northeast-1.amazonaws.com/bbpl-test-repo:main"
+
+  AcmCertificateArn:
+    Type: String
+    Default: "arn:aws:acm:ap-northeast-1:296066267476:certificate/369f1e67-f3ee-42ef-9e2b-adb933855f97"
+
+  # ACM TEST
+  record01:
+    Type: String
+    Default: test.hito.com
+
+Resources:
+  # assenbly network template  
+  # ap-northeast-1
+  # public-subnet-1a
+  # public-subnet-1c
+  # private-subnet-1a
+  # private-subnet-1c
+
+
+  NetworkLayer:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Ref NetworkTemplate
+      Parameters:
+        EnvTag: !Ref EnvTag
+        EnvIp: !FindInMap ["EnvMap", !Ref EnvTag, "EnvIp"]
+        Prefix: !Ref Prefix
+
+
+  SecurityLayer:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: NetworkLayer
+    Properties:
+      TemplateURL: !Ref SecurityTemplate
+      Parameters:
+        EnvTag: !Ref EnvTag
+        Prefix: !Ref Prefix
+        VpcId: !GetAtt NetworkLayer.Outputs.VpcId
+
+
+  AlbStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: SecurityLayer
+    Properties:
+      TemplateURL: !Ref AlbTemplate
+      Parameters:
+        EnvTag: !Ref EnvTag
+        Prefix: !Ref Prefix
+        AcmCertificateArn: !Ref AcmCertificateArn
+        VpcId: !GetAtt NetworkLayer.Outputs.VpcId
+        SubnetPublic1a1: !GetAtt NetworkLayer.Outputs.SubnetPublic1a1
+        SubnetPublic1c1: !GetAtt NetworkLayer.Outputs.SubnetPublic1c1
+        SgAlb: !GetAtt SecurityLayer.Outputs.SgAlb
+        
+
+  EcsStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: AlbStack
+    Properties:
+      TemplateURL: !Ref EcsTemplate
+      Parameters:
+        EnvTag: !Ref EnvTag
+        Prefix: !Ref Prefix
+        EcsImageName: !Ref EcsImageName
+        EcsTaskExecutionRoleArn: !GetAtt SecurityLayer.Outputs.EcsTaskExecutionRole
+        AlbTgBlue: !GetAtt AlbStack.Outputs.AlbTgBlue
+        AlbTgGreen: !GetAtt AlbStack.Outputs.AlbTgGreen
+        SubnetPrivate1a1: !GetAtt NetworkLayer.Outputs.SubnetPrivate1a1
+        SubnetPrivate1c1: !GetAtt NetworkLayer.Outputs.SubnetPrivate1c1
+        SgEcs: !GetAtt SecurityLayer.Outputs.SgEcs
+        CodeDeployExecutionRole: !GetAtt SecurityLayer.Outputs.CodeDeployExecutionRole
+        Alb: !GetAtt AlbStack.Outputs.Alb
+
+  LambdaStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: EcsStack
+    Properties:
+      TemplateURL: !Ref LambdaTemplate
+      Parameters:
+        EnvTag: !Ref EnvTag
+        Prefix: !Ref Prefix
+        LambdaExecutionRole: !GetAtt SecurityLayer.Outputs.LambdaExecutionRole
+        CodeDeployExecutionRole: !GetAtt SecurityLayer.Outputs.CodeDeployExecutionRole
+        AlbTgBlueName: !GetAtt AlbStack.Outputs.AlbTgBlueName
+        AlbTgGreenName: !GetAtt AlbStack.Outputs.AlbTgGreenName
+        AlbListenerBlue: !GetAtt AlbStack.Outputs.AlbListenerBlue
+        AlbListenerGreen: !GetAtt AlbStack.Outputs.AlbListenerGreen
+
+# Outputs:
+#   ACM:
+#     Value: !Ref AcmCertificateArn
+    
+#   VpcId:
+#     Value: !GetAtt NetworkLayer.Outputs.VpcId
+#     Description: VPC CIDR Block
+
